@@ -6,6 +6,8 @@ import (
 	"net"
 	"os"
 	"strconv"
+
+	http "gone/internal"
 )
 
 func main() {
@@ -14,8 +16,8 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	
-	listener, err := net.Listen("tcp", ":" + strconv.FormatUint(uint64(config.port), 10))
+
+	listener, err := net.Listen("tcp", ":"+strconv.FormatUint(uint64(config.port), 10))
 	if err != nil {
 		fmt.Printf("Failed to start webserver on port %d. Error: %s\n", config.port, err)
 		os.Exit(1)
@@ -25,12 +27,13 @@ func main() {
 	fmt.Printf("Running webserver on port %d\n", config.port)
 
 	for {
-		_, err := listener.Accept()
+		conn, err := listener.Accept()
 		if err != nil {
-			fmt.Printf("Failed to accept connection. Error: %s", err)	
+			fmt.Printf("Failed to accept connection. Error: %s", err)
 			continue
 		}
-
+		http.ProcessRequest(conn, conn)
+		conn.Close()
 	}
 }
 
