@@ -32,7 +32,7 @@ func main() {
 			fmt.Printf("Failed to accept connection. Error: %s", err)
 			continue
 		}
-		http.ProcessRequest(conn, conn)
+		http.ProcessFileGetRequest(conn, conn)
 		conn.Close()
 	}
 }
