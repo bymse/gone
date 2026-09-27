@@ -40,6 +40,13 @@ type HTTPError struct {
 	code httpRequestError
 }
 
+type httpResponse struct {
+	httpVersion string
+	statusCode  int
+	headers     map[string]string
+	body        []byte
+}
+
 func (err *HTTPError) Error() string {
 	switch err.code {
 	case UnsupportedMethod:
@@ -59,28 +66,112 @@ func (err *HTTPError) Error() string {
 	}
 }
 
+func (resp httpResponse) reasonPhrase() string {
+	switch resp.statusCode {
+	case 404:
+		return "Not Found"
+	case 403:
+		return "Forbidden"
+	case 200:
+		return "Ok"
+	default:
+		return "Dunno"
+	}
+}
+
 func ProcessFileGetRequest(reader io.Reader, writer io.Writer, baseDir string) error {
 	req, err := parseRequest(reader)
 	if err != nil {
-		return err
+		return writeResponse(httpResponse{
+			httpVersion: "HTTP/1.1",
+			statusCode:  400,
+			headers:     map[string]string{},
+			body:        []byte(err.Error()),
+		}, writer)
 	}
 
 	path, err := url.PathUnescape(req.requestTarget)
 	if err != nil {
-		return err
+		return writeResponse(httpResponse{
+			httpVersion: req.httpVersion,
+			statusCode:  400,
+			body:        []byte{},
+			headers:     map[string]string{},
+		}, writer)
 	}
 
 	f, err := os.OpenInRoot(baseDir, path)
 	if err != nil {
-		return err
+		return writeResponse(httpResponse{
+			httpVersion: req.httpVersion,
+			statusCode:  403,
+			body:        []byte{},
+			headers:     map[string]string{},
+		}, writer)
 	}
 
 	s, err := os.Stat(f.Name())
 	if err != nil {
-		return err 
+		return writeResponse(httpResponse{
+			httpVersion: req.httpVersion,
+			statusCode:  404,
+			body:        []byte{},
+			headers:     map[string]string{},
+		}, writer)
 	}
 
-	return nil
+	if s.IsDir() {
+		return writeResponse(httpResponse{
+			httpVersion: req.httpVersion,
+			statusCode:  400,
+			body:        []byte{},
+			headers:     map[string]string{},
+		}, writer)
+	}
+
+	fileBuf := make([]byte, s.Size())
+	n := 0
+	for {
+		n, err = f.Read(fileBuf[n:])
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return writeResponse(httpResponse{
+				httpVersion: req.httpVersion,
+				statusCode:  500,
+				body:        []byte{},
+				headers:     map[string]string{},
+			}, writer)
+		}
+	}
+
+	return writeResponse(httpResponse{
+		httpVersion: req.httpVersion,
+		statusCode:  200,
+		body:        fileBuf,
+		headers:     map[string]string{},
+	}, writer)
+}
+
+func writeResponse(resp httpResponse, writer io.Writer) error {
+	buf := make([]byte, len(resp.body)+10+len(resp.headers)*10)
+
+	buf = fmt.Appendf(buf, "%s %d %s\r\n", resp.httpVersion, resp.statusCode, resp.reasonPhrase())
+
+	for key, val := range resp.headers {
+		buf = fmt.Appendf(buf, "%s: %s\r\n", key, val)
+	}
+
+	if len(resp.body) > 0 {
+		buf = fmt.Appendf(buf, "Conent-Length: %d\r\n\r\n", len(resp.body))
+		buf = append(buf, resp.body...)
+	} else {
+		buf = fmt.Append(buf, "\r\n")
+	}
+
+	_, err := writer.Write(buf)
+
+	return err
 }
 
 func parseRequest(reader io.Reader) (req httpRequest, err error) {
