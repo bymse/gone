@@ -70,6 +70,8 @@ func (resp httpResponse) reasonPhrase() string {
 	switch resp.statusCode {
 	case 404:
 		return "Not Found"
+	case 400:
+		return "Bad Request"
 	case 403:
 		return "Forbidden"
 	case 200:
@@ -98,6 +100,11 @@ func ProcessFileGetRequest(reader io.Reader, writer io.Writer, baseDir string) e
 			body:        []byte{},
 			headers:     map[string]string{},
 		}, writer)
+	}
+	if len(path) == 1 {
+		path = "."
+	} else if path[0] == '/' {
+		path = path[1:]
 	}
 
 	f, err := os.OpenInRoot(baseDir, path)
@@ -154,13 +161,14 @@ func ProcessFileGetRequest(reader io.Reader, writer io.Writer, baseDir string) e
 }
 
 func writeResponse(resp httpResponse, writer io.Writer) error {
-	buf := make([]byte, len(resp.body)+10+len(resp.headers)*10)
+	buf := make([]byte, 0)
 
 	buf = fmt.Appendf(buf, "%s %d %s\r\n", resp.httpVersion, resp.statusCode, resp.reasonPhrase())
 
 	for key, val := range resp.headers {
 		buf = fmt.Appendf(buf, "%s: %s\r\n", key, val)
 	}
+	buf = fmt.Append(buf, "Server: gone\r\n")
 
 	if len(resp.body) > 0 {
 		buf = fmt.Appendf(buf, "Conent-Length: %d\r\n\r\n", len(resp.body))
@@ -177,8 +185,8 @@ func writeResponse(resp httpResponse, writer io.Writer) error {
 func parseRequest(reader io.Reader) (req httpRequest, err error) {
 	buff := make([]byte, 4096)
 	n, err := reader.Read(buff)
-	httpRequest := httpRequest{}
-	httpRequest.headers = make(map[string][]string)
+	req = httpRequest{}
+	req.headers = make(map[string][]string)
 
 	sectionStart := 0
 	state := RequestLine
@@ -194,10 +202,11 @@ func parseRequest(reader io.Reader) (req httpRequest, err error) {
 			var sectionValue string
 			needsSectionValue := state == RequestLine || state == Headers
 			if needsSectionValue && curr == '\r' && next == '\n' {
-				i++
-				next = -1
 				sectionValue = string(buff[sectionStart:i])
 				sectionValueSet = true
+				i++
+				next = -1
+				sectionStart = i + 1
 			}
 
 			switch state {
@@ -206,9 +215,9 @@ func parseRequest(reader io.Reader) (req httpRequest, err error) {
 					continue
 				}
 
-				httpErr := parseRequestLine(&httpRequest, sectionValue)
+				httpErr := parseRequestLine(&req, sectionValue)
 				if httpErr != nil {
-					return req, err
+					return req, httpErr
 				}
 
 				state = Headers
@@ -222,9 +231,9 @@ func parseRequest(reader io.Reader) (req httpRequest, err error) {
 					continue
 				}
 
-				httpErr := parseHeader(httpRequest.headers, sectionValue)
+				httpErr := parseHeader(req.headers, sectionValue)
 				if httpErr != nil {
-					return req, err
+					return req, httpErr
 				}
 			case Body:
 				return req, &HTTPError{
@@ -237,14 +246,14 @@ func parseRequest(reader io.Reader) (req httpRequest, err error) {
 	}
 
 	if err != nil && err != io.EOF {
-		return httpRequest, err
+		return req, err
 	}
 
 	if state == Body {
-		return httpRequest, nil
+		return req, nil
 	}
 
-	return httpRequest, &HTTPError{
+	return req, &HTTPError{
 		code: IncompleteRequest,
 	}
 }

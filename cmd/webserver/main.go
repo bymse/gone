@@ -24,7 +24,7 @@ func main() {
 	}
 
 	defer listener.Close()
-	fmt.Printf("Running webserver on port %d\n", config.port)
+	fmt.Printf("Running webserver on port %d\nBase dir '%s'\n", config.port, config.baseDir)
 
 	for {
 		conn, err := listener.Accept()
@@ -32,17 +32,19 @@ func main() {
 			fmt.Printf("Failed to accept connection. Error: %s", err)
 			continue
 		}
-		http.ProcessFileGetRequest(conn, conn)
+		http.ProcessFileGetRequest(conn, conn, config.baseDir)
 		conn.Close()
 	}
 }
 
 type config struct {
-	port uint16
+	port    uint16
+	baseDir string
 }
 
 func parseConfig() (config, error) {
 	var port uint16 = 34876
+	var baseDir string
 	index := 0
 	for index < len(os.Args) {
 		switch os.Args[index] {
@@ -58,9 +60,16 @@ func parseConfig() (config, error) {
 			}
 
 			port = uint16(parsedPort)
+		case "--base-dir":
+			if len(os.Args) <= index+1 {
+				return config{}, errors.New("missing arg for --base-dir")
+			}
+
+			baseDir = os.Args[index+1]
 		}
+
 		index++
 	}
 
-	return config{port: port}, nil
+	return config{port: port, baseDir: baseDir}, nil
 }
